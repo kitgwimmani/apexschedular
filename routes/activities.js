@@ -2,82 +2,173 @@ const express = require('express');
 const router = express.Router();
 const Activity = require('../models/Activity');
 const { validateActivity } = require('../middleware/validation');
+const { auth, managerAuth } = require('../middleware/auth');
 
 // Get all activities
-router.get('/', async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
-    const activities = await Activity.find().populate('category_id');
-    res.json(activities);
+    const { status, priority, category, page = 1, limit = 10 } = req.query;
+    
+    const filter = {};
+    if (status) filter.status = status;
+    if (priority) filter.priority_level = priority;
+    if (category) filter.category_id = category;
+    
+    const activities = await Activity.find(filter)
+      .populate('created_by', 'username email')
+      .populate('focal_person', 'username email')
+      .populate('category_id', 'name')
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ created_at: -1 });
+    
+    const total = await Activity.countDocuments(filter);
+    
+    res.json({
+      success: true,
+      data: activities,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Get activities error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching activities'
+    });
   }
 });
 
-// Get a specific activity
-router.get('/:id', async (req, res) => {
+// Get single activity
+router.get('/:id', auth, async (req, res) => {
   try {
-    const activity = await Activity.findById(req.params.id).populate('category_id');
+    const activity = await Activity.findById(req.params.id)
+      .populate('created_by', 'username email')
+      .populate('focal_person', 'username email')
+      .populate('category_id', 'name description');
+    
     if (!activity) {
-      return res.status(404).json({ message: 'Activity not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found'
+      });
     }
-    res.json(activity);
+    
+    res.json({
+      success: true,
+      data: activity
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Get activity error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching activity'
+    });
   }
 });
 
-// Create a new activity
-// In the POST route for creating activities:
-router.post('/', validateActivity, async (req, res) => {
+// Create new activity
+router.post('/', [auth, managerAuth, validateActivity], async (req, res) => {
   try {
-    // Use the authenticated user's ID
     const activityData = {
       ...req.body,
-      created_by: req.user.id, // Use the authenticated user's ID
-      focal_person: req.body.focal_person || req.user.id // Default to current user if not specified
+      created_by: req.user._id
     };
     
     const activity = new Activity(activityData);
-    const savedActivity = await activity.save();
-    await savedActivity.populate('category_id');
-    await savedActivity.populate('created_by', 'username email');
-    await savedActivity.populate('focal_person', 'username email');
+    await activity.save();
     
-    res.status(201).json(savedActivity);
+    await activity.populate('created_by', 'username email');
+    await activity.populate('focal_person', 'username email');
+    await activity.populate('category_id', 'name');
+    
+    res.status(201).json({
+      success: true,
+      message: 'Activity created successfully',
+      data: activity
+    });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error('Create activity error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while creating activity'
+    });
   }
 });
 
-// Update an activity
-router.put('/:id', validateActivity, async (req, res) => {
+// Update activity
+router.put('/:id', [auth, validateActivity], async (req, res) => {
   try {
-    const activity = await Activity.findByIdAndUpdate(
+    const activity = await Activity.findById(req.params.id);
+    
+    if (!activity) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found'
+      });
+    }
+    
+    // Check permissions
+    if (req.user.role !== 'admin' && 
+        req.user.role !== 'manager' && 
+        activity.created_by.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+    
+    const updatedActivity = await Activity.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true }
-    ).populate('category_id');
+    )
+      .populate('created_by', 'username email')
+      .populate('focal_person', 'username email')
+      .populate('category_id', 'name');
     
-    if (!activity) {
-      return res.status(404).json({ message: 'Activity not found' });
-    }
-    
-    res.json(activity);
+    res.json({
+      success: true,
+      message: 'Activity updated successfully',
+      data: updatedActivity
+    });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error('Update activity error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating activity'
+    });
   }
 });
 
-// Delete an activity
-router.delete('/:id', async (req, res) => {
+// Delete activity
+router.delete('/:id', [auth, managerAuth], async (req, res) => {
   try {
-    const activity = await Activity.findByIdAndDelete(req.params.id);
+    const activity = await Activity.findById(req.params.id);
+    
     if (!activity) {
-      return res.status(404).json({ message: 'Activity not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found'
+      });
     }
-    res.json({ message: 'Activity deleted successfully' });
+    
+    await Activity.findByIdAndDelete(req.params.id);
+    
+    res.json({
+      success: true,
+      message: 'Activity deleted successfully'
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Delete activity error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while deleting activity'
+    });
   }
 });
 

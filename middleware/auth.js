@@ -1,46 +1,89 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-
-// Verify JWT token
 const auth = async (req, res, next) => {
   try {
+    // Get token from header
     const token = req.header('Authorization')?.replace('Bearer ', '');
     
     if (!token) {
-      return res.status(401).json({ message: 'Access denied. No token provided.' });
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Access denied. No token provided.' 
+      });
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.id).select('-password');
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Find user and attach to request
+    const user = await User.findById(decoded.userId).select('-password');
     
     if (!user || !user.isActive) {
-      return res.status(401).json({ message: 'Token is not valid.' });
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Token is not valid. User not found or inactive.' 
+      });
     }
 
     req.user = user;
     next();
   } catch (error) {
-    res.status(401).json({ message: 'Token is not valid.' });
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid token.' 
+      });
+    }
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Token expired.' 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error during authentication.' 
+    });
   }
 };
 
-// Role-based authorization
-const authorize = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+// Admin authorization middleware
+const adminAuth = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'admin') {
       return res.status(403).json({ 
-        message: `User role ${req.user.role} is not authorized to access this resource` 
+        success: false, 
+        message: 'Access denied. Admin privileges required.' 
       });
     }
     next();
-  };
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error during authorization.' 
+    });
+  }
 };
 
-// Generate JWT token
-const generateToken = (id) => {
-  return jwt.sign({ id }, JWT_SECRET, { expiresIn: '7d' });
+// Manager or Admin authorization middleware
+const managerAuth = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'admin' && req.user.role !== 'manager') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Access denied. Manager or Admin privileges required.' 
+      });
+    }
+    next();
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error during authorization.' 
+    });
+  }
 };
 
-module.exports = { auth, authorize, generateToken };
+module.exports = { auth, adminAuth, managerAuth };

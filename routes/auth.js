@@ -1,138 +1,192 @@
 const express = require('express');
-const { body, validationResult } = require('express-validator');
-const User = require('../models/User');
-const { generateToken } = require('../middleware/auth');
-const rateLimit = require('express-rate-limit');
-
 const router = express.Router();
-
-// Rate limiting for auth routes
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
-  message: 'Too many authentication attempts, please try again later.'
-});
-
-// Apply rate limiting to auth routes
-router.use(authLimiter);
+const User = require('../models/User');
+const { validateRegistration, validateLogin } = require('../middleware/validation');
+const { auth } = require('../middleware/auth'); // Add this import
 
 // Register new user
-router.post('/register', [
-  body('username')
-    .isLength({ min: 3, max: 50 })
-    .withMessage('Username must be between 3 and 50 characters')
-    .matches(/^[a-zA-Z0-9_]+$/)
-    .withMessage('Username can only contain letters, numbers, and underscores'),
-  body('email')
-    .isEmail()
-    .withMessage('Please provide a valid email')
-    .normalizeEmail(),
-  body('password')
-    .isLength({ min: 6 })
-    .withMessage('Password must be at least 6 characters long')
-], async (req, res) => {
+router.post('/register', validateRegistration, async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    const { username, email, password } = req.body;
 
-    const { username, email, password, role } = req.body;
-
-    // Check if user already exists
     const existingUser = await User.findOne({
       $or: [{ email }, { username }]
     });
 
     if (existingUser) {
-      return res.status(400).json({ 
-        message: 'User with this email or username already exists' 
+      return res.status(400).json({
+        success: false,
+        message: 'User already exists with this email or username'
       });
     }
 
-    // Create new user
-    const user = new User({
-      username,
-      email,
-      password,
-      role: role || 'user'
-    });
-
+    const user = new User({ username, email, password });
     await user.save();
 
-    // Generate token
-    const token = generateToken(user._id);
+    // FIX: Use generateAuthToken instead of generateToken
+    const token = user.generateAuthToken();
 
     res.status(201).json({
-      message: 'User created successfully',
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role
+      success: true,
+      message: 'User registered successfully',
+      data: {
+        user,
+        token
       }
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ message: 'Server error during registration' });
+    res.status(500).json({
+      success: false,
+      message: 'Server error during registration'
+    });
   }
 });
 
 // Login user
-router.post('/login', [
-  body('email').isEmail().withMessage('Please provide a valid email'),
-  body('password').notEmpty().withMessage('Password is required')
-], async (req, res) => {
+router.post('/login', validateLogin, async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
     const { email, password } = req.body;
 
-    // Find user by email
     const user = await User.findOne({ email });
-    if (!user || !user.isActive) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
     }
 
-    // Check password
+    if (!user.isActive) {
+      return res.status(401).json({
+        success: false,
+        message: 'Account is deactivated'
+      });
+    }
+
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
     }
 
-    // Generate token
-    const token = generateToken(user._id);
+    // FIX: Use generateAuthToken instead of generateToken
+    const token = user.generateAuthToken();
 
     res.json({
+      success: true,
       message: 'Login successful',
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role
+      data: {
+        user,
+        token
       }
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ message: 'Server error during login' });
+    res.status(500).json({
+      success: false,
+      message: 'Server error during login'
+    });
   }
 });
 
 // Get current user profile
-router.get('/me', async (req, res) => {
+router.get('/me', auth, async (req, res) => {
   try {
-    // This route should be protected by auth middleware
-    // The user will be attached to req by the auth middleware
-    const user = await User.findById(req.user.id).select('-password');
-    res.json(user);
+    res.json({
+      success: true,
+      data: {
+        user: req.user
+      }
+    });
   } catch (error) {
-    console.error('Profile error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Get profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching profile'
+    });
+  }
+});
+
+// Update user profile
+router.put('/profile', auth, async (req, res) => {
+  try {
+    const { username, email } = req.body;
+    const updates = {};
+    
+    if (username) updates.username = username;
+    if (email) updates.email = email;
+    
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      updates,
+      { new: true, runValidators: true }
+    ).select('-password');
+    
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: { user }
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username or email already exists'
+      });
+    }
+    
+    console.error('Update profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating profile'
+    });
+  }
+});
+
+// Change password
+router.put('/change-password', auth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current and new password are required'
+      });
+    }
+    
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters'
+      });
+    }
+    
+    const user = await User.findById(req.user._id);
+    const isCurrentPasswordValid = await user.comparePassword(currentPassword);
+    
+    if (!isCurrentPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+    
+    user.password = newPassword;
+    await user.save();
+    
+    res.json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while changing password'
+    });
   }
 });
 

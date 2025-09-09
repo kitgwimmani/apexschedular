@@ -9,12 +9,11 @@ const activityRoutes = require('./routes/activities');
 const activityMetaRoutes = require('./routes/activityMeta');
 const categoryRoutes = require('./routes/categories');
 const activityInstanceRoutes = require('./routes/activityInstances');
-const authRoutes = require('./routes/auth'); // New auth routes
+const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 
-
 // Import middleware
-const { auth } = require('./middleware/auth'); // Auth middleware
+const { auth, adminAuth } = require('./middleware/auth'); // Add adminAuth import
 
 // Initialize express app
 const app = express();
@@ -34,7 +33,8 @@ app.use('/api/activities', auth, activityRoutes);
 app.use('/api/activity-meta', auth, activityMetaRoutes);
 app.use('/api/categories', auth, categoryRoutes);
 app.use('/api/activity-instances', auth, activityInstanceRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/admin', auth, adminAuth, adminRoutes); // Add adminAuth middleware
+
 // Basic route
 app.get('/', (req, res) => {
   res.json({ message: 'Activity Management API is running!' });

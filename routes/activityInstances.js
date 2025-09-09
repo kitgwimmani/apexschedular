@@ -1,85 +1,168 @@
 const express = require('express');
 const router = express.Router();
 const ActivityInstance = require('../models/ActivityInstance');
+const Activity = require('../models/Activity');
 const { validateActivityInstance } = require('../middleware/validation');
+const { auth, managerAuth } = require('../middleware/auth');
 
-// Get all activity instances
-router.get('/', async (req, res) => {
+// Get all activity instances for an activity
+router.get('/activity/:activityId', auth, async (req, res) => {
   try {
-    const activityInstances = await ActivityInstance.find().populate('activity_id');
-    res.json(activityInstances);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Get instances for a specific activity
-router.get('/activity/:activityId', async (req, res) => {
-  try {
-    const activityInstances = await ActivityInstance.find({ 
-      activity_id: req.params.activityId 
-    }).populate('activity_id');
+    const { page = 1, limit = 10 } = req.query;
     
-    res.json(activityInstances);
+    const activityInstances = await ActivityInstance.find({
+      activity_id: req.params.activityId
+    })
+      .populate('activity_id')
+      .populate('created_by', 'username email')
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ start_time: -1 });
+    
+    const total = await ActivityInstance.countDocuments({
+      activity_id: req.params.activityId
+    });
+    
+    res.json({
+      success: true,
+      data: activityInstances,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Get activity instances error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching activity instances'
+    });
   }
 });
 
-// Get a specific activity instance
-router.get('/:id', async (req, res) => {
+// Get single activity instance
+router.get('/:id', auth, async (req, res) => {
   try {
-    const activityInstance = await ActivityInstance.findById(req.params.id).populate('activity_id');
+    const activityInstance = await ActivityInstance.findById(req.params.id)
+      .populate('activity_id')
+      .populate('created_by', 'username email');
+    
     if (!activityInstance) {
-      return res.status(404).json({ message: 'Activity instance not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Activity instance not found'
+      });
     }
-    res.json(activityInstance);
+    
+    res.json({
+      success: true,
+      data: activityInstance
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Get activity instance error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching activity instance'
+    });
   }
 });
 
-// Create a new activity instance
-router.post('/', validateActivityInstance, async (req, res) => {
+// Create new activity instance
+router.post('/', [auth, managerAuth, validateActivityInstance], async (req, res) => {
   try {
-    const activityInstance = new ActivityInstance(req.body);
-    const savedInstance = await activityInstance.save();
-    await savedInstance.populate('activity_id');
-    res.status(201).json(savedInstance);
+    const activity = await Activity.findById(req.body.activity_id);
+    if (!activity) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found'
+      });
+    }
+    
+    const activityInstanceData = {
+      ...req.body,
+      created_by: req.user._id
+    };
+    
+    const activityInstance = new ActivityInstance(activityInstanceData);
+    await activityInstance.save();
+    
+    await activityInstance.populate('activity_id');
+    await activityInstance.populate('created_by', 'username email');
+    
+    res.status(201).json({
+      success: true,
+      message: 'Activity instance created successfully',
+      data: activityInstance
+    });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error('Create activity instance error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while creating activity instance'
+    });
   }
 });
 
-// Update an activity instance
-router.put('/:id', validateActivityInstance, async (req, res) => {
+// Update activity instance
+router.put('/:id', [auth, managerAuth, validateActivityInstance], async (req, res) => {
   try {
-    const activityInstance = await ActivityInstance.findByIdAndUpdate(
+    const activityInstance = await ActivityInstance.findById(req.params.id);
+    
+    if (!activityInstance) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity instance not found'
+      });
+    }
+    
+    const updatedActivityInstance = await ActivityInstance.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true }
-    ).populate('activity_id');
+    )
+      .populate('activity_id')
+      .populate('created_by', 'username email');
     
-    if (!activityInstance) {
-      return res.status(404).json({ message: 'Activity instance not found' });
-    }
-    
-    res.json(activityInstance);
+    res.json({
+      success: true,
+      message: 'Activity instance updated successfully',
+      data: updatedActivityInstance
+    });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error('Update activity instance error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while updating activity instance'
+    });
   }
 });
 
-// Delete an activity instance
-router.delete('/:id', async (req, res) => {
+// Delete activity instance
+router.delete('/:id', [auth, managerAuth], async (req, res) => {
   try {
-    const activityInstance = await ActivityInstance.findByIdAndDelete(req.params.id);
+    const activityInstance = await ActivityInstance.findById(req.params.id);
+    
     if (!activityInstance) {
-      return res.status(404).json({ message: 'Activity instance not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Activity instance not found'
+      });
     }
-    res.json({ message: 'Activity instance deleted successfully' });
+    
+    await ActivityInstance.findByIdAndDelete(req.params.id);
+    
+    res.json({
+      success: true,
+      message: 'Activity instance deleted successfully'
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Delete activity instance error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while deleting activity instance'
+    });
   }
 });
 

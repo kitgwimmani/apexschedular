@@ -1,73 +1,120 @@
 const express = require('express');
 const router = express.Router();
 const ActivityMeta = require('../models/ActivityMeta');
+const Activity = require('../models/Activity');
 const { validateActivityMeta } = require('../middleware/validation');
+const { auth, managerAuth } = require('../middleware/auth');
 
-// Get all activity meta
-router.get('/', async (req, res) => {
-  try {
-    const activityMeta = await ActivityMeta.find().populate('activity_id');
-    res.json(activityMeta);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Get meta for a specific activity
-router.get('/:activityId', async (req, res) => {
+// Get activity meta by activity ID
+router.get('/activity/:activityId', auth, async (req, res) => {
   try {
     const activityMeta = await ActivityMeta.findOne({ 
       activity_id: req.params.activityId 
     }).populate('activity_id');
     
     if (!activityMeta) {
-      return res.status(404).json({ message: 'Activity meta not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Activity metadata not found'
+      });
     }
     
-    res.json(activityMeta);
+    res.json({
+      success: true,
+      data: activityMeta
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Get activity meta error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching activity metadata'
+    });
   }
 });
 
 // Create or update activity meta
-router.post('/', validateActivityMeta, async (req, res) => {
+router.post('/', [auth, managerAuth, validateActivityMeta], async (req, res) => {
   try {
-    // Check if meta already exists for this activity
+    const activity = await Activity.findById(req.body.activity_id);
+    if (!activity) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity not found'
+      });
+    }
+    
     let activityMeta = await ActivityMeta.findOne({ 
       activity_id: req.body.activity_id 
     });
     
+    const metaData = {
+      ...req.body,
+      created_by: req.user._id
+    };
+    
     if (activityMeta) {
-      // Update existing meta
-      activityMeta = await ActivityMeta.findByIdAndUpdate(
-        activityMeta._id,
-        req.body,
+      activityMeta = await ActivityMeta.findOneAndUpdate(
+        { activity_id: req.body.activity_id },
+        metaData,
         { new: true, runValidators: true }
       ).populate('activity_id');
+      
+      return res.json({
+        success: true,
+        message: 'Activity metadata updated successfully',
+        data: activityMeta
+      });
     } else {
-      // Create new meta
-      activityMeta = new ActivityMeta(req.body);
+      activityMeta = new ActivityMeta(metaData);
       await activityMeta.save();
       await activityMeta.populate('activity_id');
+      
+      return res.status(201).json({
+        success: true,
+        message: 'Activity metadata created successfully',
+        data: activityMeta
+      });
+    }
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Metadata already exists for this activity'
+      });
     }
     
-    res.status(201).json(activityMeta);
-  } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error('Create/update activity meta error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while creating/updating activity metadata'
+    });
   }
 });
 
 // Delete activity meta
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', [auth, managerAuth], async (req, res) => {
   try {
-    const activityMeta = await ActivityMeta.findByIdAndDelete(req.params.id);
+    const activityMeta = await ActivityMeta.findById(req.params.id);
+    
     if (!activityMeta) {
-      return res.status(404).json({ message: 'Activity meta not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Activity metadata not found'
+      });
     }
-    res.json({ message: 'Activity meta deleted successfully' });
+    
+    await ActivityMeta.findByIdAndDelete(req.params.id);
+    
+    res.json({
+      success: true,
+      message: 'Activity metadata deleted successfully'
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Delete activity meta error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while deleting activity metadata'
+    });
   }
 });
 
