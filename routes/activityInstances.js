@@ -4,7 +4,6 @@ const ActivityInstance = require('../models/ActivityInstance');
 const Activity = require('../models/Activity');
 const { validateActivityInstance } = require('../middleware/validation');
 const { auth, managerAuth } = require('../middleware/auth');
-const { sendEmail } = require('../utils/mailer'); 
 
 // Get all activity instances for an activity
 router.get('/activity/:activityId', auth, async (req, res) => {
@@ -188,48 +187,5 @@ router.delete('/:id', [auth, managerAuth], async (req, res) => {
   }
 });
 
-router.post('/send-email', auth, async (req, res) => {
-  try {
-    const { to, subject, message, html } = req.body;
-
-    // Validate required fields
-    if (!to || !subject || (!message && !html)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields: to, subject, and message or html are required'
-      });
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(to)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid email address format'
-      });
-    }
-
-    // Send email
-    await sendEmail(
-      to, 
-      subject, 
-      html || `<p>${message}</p>`,
-      message
-    );
-
-    res.json({
-      success: true,
-      message: 'Email sent successfully'
-    });
-
-  } catch (error) {
-    console.error('Send email error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to send email',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
 
 module.exports = router;
