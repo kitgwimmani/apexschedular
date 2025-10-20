@@ -7,8 +7,7 @@ const activitySchema = new mongoose.Schema({
     maxlength: 255
   },
   description: {
-    type: String,
-    required: true
+    type: String
   },
   created_at: {
     type: Date,
