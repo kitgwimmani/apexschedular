@@ -11,6 +11,7 @@ const categoryRoutes = require('./routes/categories');
 const activityInstanceRoutes = require('./routes/activityInstances');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
+const emailRoutes = require('./routes/mail');
 
 // Import middleware
 const { auth, adminAuth } = require('./middleware/auth'); // Add adminAuth import
@@ -34,6 +35,7 @@ app.use('/api/activity-meta', auth, activityMetaRoutes);
 app.use('/api/categories', auth, categoryRoutes);
 app.use('/api/activity-instances', auth, activityInstanceRoutes);
 app.use('/api/admin', auth, adminAuth, adminRoutes); // Add adminAuth middleware
+app.use('/api/mail', emailRoutes);
 
 // Basic route
 app.get('/', (req, res) => {
