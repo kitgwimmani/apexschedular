@@ -2,10 +2,11 @@ const express = require('express');
 const router = express.Router();
 const { sendEmail } = require('../utils/mailer');
 
-// POST /send-email
 router.post('/send-email', async (req, res) => {
   try {
     const { to, subject, text, html, category } = req.body;
+
+    console.log('Received email request:', { to, subject });
 
     // Validation
     if (!to || !subject || (!text && !html)) {
@@ -17,28 +18,21 @@ router.post('/send-email', async (req, res) => {
 
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const emails = to.split(',').map(email => email.trim());
-    
-    for (const email of emails) {
-      if (!emailRegex.test(email)) {
-        return res.status(400).json({
-          success: false,
-          error: `Invalid email address format: ${email}`
-        });
-      }
+    if (!emailRegex.test(to)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email address format'
+      });
     }
 
-    // Prepare mail options
-    const mailOptions = {
-      to: emails.join(', '),
+    // Send email
+    const result = await sendEmail({
+      to,
       subject,
       text,
       html: html || text,
-      category: category || 'API Email'
-    };
-
-    // Send email
-    const result = await sendEmail(mailOptions);
+      category: category || 'API Test'
+    });
 
     if (result.success) {
       res.json({
@@ -48,16 +42,25 @@ router.post('/send-email', async (req, res) => {
         environment: process.env.NODE_ENV
       });
     } else {
+      // Provide specific error messages based on status code
+      let errorMessage = 'Failed to send email';
+      if (result.status === 401) {
+        errorMessage = 'Invalid API token - check your Mailtrap token';
+      } else if (result.status === 403) {
+        errorMessage = 'API token does not have sending permissions';
+      } else if (result.status === 422) {
+        errorMessage = 'Validation failed - check email format and parameters';
+      }
+
       res.status(500).json({
         success: false,
-        error: result.error,
-        code: result.code,
-        message: 'Failed to send email via Mailtrap API'
+        error: errorMessage,
+        details: result.data || result.error
       });
     }
 
   } catch (error) {
-    console.error('Route error sending email:', error);
+    console.error('Route error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',
@@ -66,13 +69,13 @@ router.post('/send-email', async (req, res) => {
   }
 });
 
-// GET /send-email (for testing)
-router.get('/send-email', async (req, res) => {
+// Test endpoint
+router.get('/test-email', async (req, res) => {
   const testMailOptions = {
     to: 'kitgwimmani@gmail.com',
-    subject: 'Test Email via Mailtrap API',
-    text: 'This is a test email sent via Mailtrap API!',
-    html: '<p>This is a <strong>test email</strong> sent via Mailtrap API!</p>',
+    subject: 'Test Email from Neureka',
+    text: 'This is a test email from Neureka via Mailtrap API!',
+    html: '<p>This is a <strong>test email</strong> from Neureka via Mailtrap API!</p>',
     category: 'Test'
   };
 
@@ -82,13 +85,14 @@ router.get('/send-email', async (req, res) => {
     if (result.success) {
       res.json({
         success: true,
-        message: 'Test email sent successfully via Mailtrap API',
+        message: 'Test email sent successfully',
         messageId: result.messageId
       });
     } else {
       res.status(500).json({
         success: false,
-        error: result.error
+        error: result.error,
+        details: result.data
       });
     }
   } catch (error) {
