@@ -3,16 +3,13 @@ const router = express.Router();
 const { sendEmail, verifyConnection } = require('../utils/mailer');
 
 // Health check endpoint
+// In your routes/mail.js, update the health endpoint:
 router.get('/health', async (req, res) => {
   try {
-    const isConnected = await verifyConnection();
+    const health = await getEmailHealth();
     res.json({
-      success: true,
-      data: {
-        service: 'email',
-        status: isConnected ? 'connected' : 'disconnected',
-        timestamp: new Date().toISOString()
-      }
+      success: health.healthy,
+      data: health
     });
   } catch (error) {
     res.status(503).json({
