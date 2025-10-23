@@ -180,74 +180,90 @@ router.post('/', [auth, managerAuth, validateActivityInstance], async (req, res)
 });
 
 // Update activity instance
-router.put('/:id', [auth, managerAuth, validateActivityInstance], async (req, res) => {
+router.put('/:id', [auth, managerAuth], async (req, res) => {
   try {
+    const { start_time, end_time } = req.body;
+
+    if (!start_time || !end_time) {
+      return res.status(400).json({
+        success: false,
+        message: 'start_time and end_time are required',
+      });
+    }
+
+    if (new Date(start_time) >= new Date(end_time)) {
+      return res.status(400).json({
+        success: false,
+        message: 'start_time must be before end_time',
+      });
+    }
+
     const activityInstance = await ActivityInstance.findById(req.params.id);
-    
     if (!activityInstance) {
       return res.status(404).json({
         success: false,
-        message: 'Activity instance not found'
+        message: 'Activity instance not found',
       });
     }
-    
-    // Check for time conflicts (excluding current instance)
-    if (req.body.start_time || req.body.end_time) {
-      const conflictingInstance = await ActivityInstance.findOne({
-        _id: { $ne: req.params.id },
-        activity_id: req.body.activity_id || activityInstance.activity_id,
-        $or: [
-          {
-            start_time: { $lt: req.body.end_time || activityInstance.end_time },
-            end_time: { $gt: req.body.start_time || activityInstance.start_time }
-          }
-        ]
+
+    // Check for overlapping time
+    const conflictingInstance = await ActivityInstance.findOne({
+      _id: { $ne: req.params.id },
+      activity_id: activityInstance.activity_id,
+      $or: [
+        {
+          start_time: { $lt: end_time },
+          end_time: { $gt: start_time },
+        },
+      ],
+    });
+
+    if (conflictingInstance) {
+      return res.status(400).json({
+        success: false,
+        message: 'Time conflict with existing activity instance',
       });
-      
-      if (conflictingInstance) {
-        return res.status(400).json({
-          success: false,
-          message: 'Time conflict with existing activity instance'
-        });
-      }
     }
-    
-    const updatedActivityInstance = await ActivityInstance.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    )
+
+    // Update only times
+    activityInstance.start_time = new Date(start_time);
+    activityInstance.end_time = new Date(end_time);
+
+    await activityInstance.save();
+
+    const updatedActivityInstance = await ActivityInstance.findById(req.params.id)
       .populate('activity_id')
       .populate('created_by', 'username email');
-    
+
     res.json({
       success: true,
-      message: 'Activity instance updated successfully',
-      data: updatedActivityInstance
+      message: 'Activity instance time updated successfully',
+      data: updatedActivityInstance,
     });
   } catch (error) {
     console.error('Update activity instance error:', error);
-    
+
     if (error.name === 'CastError') {
       return res.status(400).json({
         success: false,
-        message: 'Invalid activity instance ID'
+        message: 'Invalid activity instance ID',
       });
     }
-    
+
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         success: false,
-        message: error.message
+        message: error.message,
       });
     }
-    
+
     res.status(500).json({
       success: false,
-      message: 'Server error while updating activity instance'
+      message: 'Server error while updating activity instance',
     });
   }
 });
+
 
 // Delete activity instance
 router.delete('/:id', [auth, managerAuth], async (req, res) => {
