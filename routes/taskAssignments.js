@@ -281,4 +281,170 @@ router.delete('/:id', [auth, managerAuth], async (req, res) => {
   }
 });
 
+// Add multiple users to an activity instance
+router.post('/bulk/users-to-activity', [auth, managerAuth], async (req, res) => {
+  try {
+    const { activity_instance_id, user_ids, status = 'Assigned', notes } = req.body;
+
+    if (!activity_instance_id || !user_ids || !Array.isArray(user_ids)) {
+      return res.status(400).json({
+        success: false,
+        message: 'activity_instance_id and user_ids array are required'
+      });
+    }
+
+    // Check if activity instance exists
+    const activityInstance = await ActivityInstance.findById(activity_instance_id);
+    if (!activityInstance) {
+      return res.status(404).json({
+        success: false,
+        message: 'Activity instance not found'
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const user_id of user_ids) {
+      try {
+        // Check if user exists
+        const user = await User.findById(user_id);
+        if (!user) {
+          errors.push({ user_id, error: 'User not found' });
+          continue;
+        }
+
+        // Check for existing assignment
+        const existingAssignment = await TaskAssignment.findOne({
+          activity_instance_id,
+          user_id
+        });
+
+        if (existingAssignment) {
+          errors.push({ user_id, error: 'Assignment already exists' });
+          continue;
+        }
+
+        // Create assignment
+        const assignment = new TaskAssignment({
+          activity_instance_id,
+          user_id,
+          status,
+          notes,
+          assigned_by: req.user._id
+        });
+
+        await assignment.save();
+        
+        // Populate the assignment
+        const populatedAssignment = await TaskAssignment.findById(assignment._id)
+          .populate('activity_instance_id')
+          .populate('user_id', 'username email')
+          .populate('assigned_by', 'username email');
+
+        results.push(populatedAssignment);
+      } catch (error) {
+        errors.push({ user_id, error: error.message });
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Bulk assignment completed. ${results.length} successful, ${errors.length} failed`,
+      data: results,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (error) {
+    console.error('Bulk users to activity error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during bulk assignment'
+    });
+  }
+});
+
+// Add multiple activity instances to a user
+router.post('/bulk/activities-to-user', [auth, managerAuth], async (req, res) => {
+  try {
+    const { user_id, activity_instance_ids, status = 'Assigned', notes } = req.body;
+
+    if (!user_id || !activity_instance_ids || !Array.isArray(activity_instance_ids)) {
+      return res.status(400).json({
+        success: false,
+        message: 'user_id and activity_instance_ids array are required'
+      });
+    }
+
+    // Check if user exists
+    const user = await User.findById(user_id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const activity_instance_id of activity_instance_ids) {
+      try {
+        // Check if activity instance exists
+        const activityInstance = await ActivityInstance.findById(activity_instance_id);
+        if (!activityInstance) {
+          errors.push({ activity_instance_id, error: 'Activity instance not found' });
+          continue;
+        }
+
+        // Check for existing assignment
+        const existingAssignment = await TaskAssignment.findOne({
+          activity_instance_id,
+          user_id
+        });
+
+        if (existingAssignment) {
+          errors.push({ activity_instance_id, error: 'Assignment already exists' });
+          continue;
+        }
+
+        // Create assignment
+        const assignment = new TaskAssignment({
+          activity_instance_id,
+          user_id,
+          status,
+          notes,
+          assigned_by: req.user._id
+        });
+
+        await assignment.save();
+        
+        // Populate the assignment
+        const populatedAssignment = await TaskAssignment.findById(assignment._id)
+          .populate('activity_instance_id')
+          .populate('user_id', 'username email')
+          .populate('assigned_by', 'username email');
+
+        results.push(populatedAssignment);
+      } catch (error) {
+        errors.push({ activity_instance_id, error: error.message });
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Bulk assignment completed. ${results.length} successful, ${errors.length} failed`,
+      data: results,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (error) {
+    console.error('Bulk activities to user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during bulk assignment'
+    });
+  }
+});
+
 module.exports = router;
