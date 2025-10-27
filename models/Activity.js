@@ -4,7 +4,8 @@ const activitySchema = new mongoose.Schema({
   title: {
     type: String,
     required: true,
-    maxlength: 255
+    maxlength: 255,
+    unique: true
   },
   description: {
     type: String
